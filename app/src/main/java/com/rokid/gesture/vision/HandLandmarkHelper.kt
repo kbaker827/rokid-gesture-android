@@ -71,6 +71,36 @@ class HandLandmarkHelper(
 
     // ── Camera binding ────────────────────────────────────────────────────────────────────────
 
+    /**
+     * HUD mode — camera runs silently in the background for gesture detection only.
+     * No [PreviewView] is used; the camera feed is never rendered on the HUD display.
+     * This is the correct mode for Rokid AI glasses where black = transparent on the OLED HUD.
+     */
+    fun bindAnalysisOnly(owner: LifecycleOwner) {
+        val future = ProcessCameraProvider.getInstance(context)
+        future.addListener({
+            val provider = future.get()
+
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                .build()
+                .also { it.setAnalyzer(cameraExec) { proxy -> processFrame(proxy) } }
+
+            try {
+                provider.unbindAll()
+                provider.bindToLifecycle(owner, cameraSelector, analysis)
+            } catch (e: Exception) {
+                Log.e(TAG, "Camera bind failed", e)
+                onError("Camera error: ${e.message}")
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+    /**
+     * Preview mode — binds both a [PreviewView] and the analysis pipeline.
+     * Use this on a phone/tablet for development and calibration.
+     */
     fun bindCamera(owner: LifecycleOwner, previewView: PreviewView) {
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({

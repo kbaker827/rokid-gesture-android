@@ -1,24 +1,38 @@
-# Rokid Gesture — Glasses Camera Edition (Android)
+# Rokid Gesture HUD (Android)
 
-Navigate your glasses menu using hand gestures detected by **the glasses' own camera** — no iPhone required.
+Navigate menus on your **Rokid AI glasses** using hand gestures detected by the glasses' own camera — no iPhone, no external device.
 
-Runs directly on **Rokid Station** or any Android-powered AR device. Uses [MediaPipe HandLandmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) to detect a 21-joint hand skeleton from the live camera feed and classifies poses into navigation actions.
+Built for the Rokid AI glasses' **transparent OLED HUD display**: black pixels are off (transparent), so every coloured element renders as a floating AR overlay in your field of view. The camera feed is never shown on the HUD; the real world remains visible through the lenses.
 
 ```
-Glasses Camera (CameraX)
+Glasses Camera (CameraX — analysis only, no preview rendered)
     ↓
-MediaPipe HandLandmarker (21-joint hand skeleton)
+MediaPipe HandLandmarker (21-joint hand skeleton, ~15 fps)
     ↓
 GestureClassifier → GestureType → NavAction
     ↓  (also: wrist movement history → SwipeGesture)
 GestureViewModel
     ↓
-Menu overlay rendered directly on the glasses display
-  ▶ Home
+HUD overlay — floating AR text on transparent OLED display
+  ▶ Home           ✌️  ← Previous Item
     Notifications
     Apps
     Settings
 ```
+
+---
+
+## How the HUD Display Works
+
+On Rokid AI glasses the display is an OLED micro-display:
+
+| Pixel colour | What you see |
+|---|---|
+| **Black** `#000000` | Nothing — the real world shows through |
+| **White / Gold / Cyan** | Floating text / shape in AR |
+| **Semi-transparent panel** `#BB000000` | Slight dim + floating panel |
+
+The app uses a fully black window background (`windowIsTranslucent = true`). Only the menu text, gesture badges, and skeleton overlay are coloured — everything else is invisible.
 
 ---
 
@@ -37,7 +51,19 @@ Menu overlay rendered directly on the glasses display
 | ↑ **Swipe Up** | Scroll to First | Wrist moves up |
 | ↓ **Swipe Down** | Scroll to Last | Wrist moves down |
 
-Every mapping is fully customisable in **Settings → Gesture → Action Mapping**.
+Every mapping is customisable in **Settings → Gesture → Action Mapping**.
+
+---
+
+## HUD Display Formats
+
+Switch in **Settings → Glasses Display Format**:
+
+| Format | What appears on the HUD |
+|--------|------------------------|
+| **Full** | All 8 items with `▶` cursor, selected in gold |
+| **Compact** | `[1/8] Home` — single line, large text |
+| **Minimal** | `Home` — just the selected item, maximum size |
 
 ---
 
@@ -45,78 +71,46 @@ Every mapping is fully customisable in **Settings → Gesture → Action Mapping
 
 ### 1. Download the MediaPipe model
 
-Before building, download `hand_landmarker.task` and place it in `app/src/main/assets/`:
-
 ```bash
 curl -Lo app/src/main/assets/hand_landmarker.task \
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 ```
 
-### 2. Build & deploy
+### 2. Build & sideload onto the glasses
 
 ```bash
-# Open in Android Studio, or:
-./gradlew installDebug
+# Connect glasses via USB, enable ADB
+adb devices                        # confirm glasses appear
+./gradlew installDebug             # build + deploy
 ```
 
-Grant **Camera** permission when prompted.
+### 3. Use the HUD
 
-### 3. Gestures tab
-
-Tap **▶** to start detection. Hold your hand 30–60 cm from the camera.  
-The 21-joint skeleton is drawn in real time. The detected gesture appears as a large emoji.  
-Use **📷 World / Front** toggle to switch between the forward-facing (world) and inward-facing camera.
-
-### 4. Menu tab
-
-- Default 8-item menu pre-loaded (Home, Notifications, Apps, Settings…)
-- Tap any row to jump the cursor
-- Swipe left on a row to delete; tap ✏️ to edit
-- Quick action bar at the bottom for manual navigation
+- Tap **▶** (top-right) to start detection
+- A pulsing green dot confirms detection is active
+- Hold your hand 30–60 cm from the forward-facing camera
+- The 21-joint skeleton appears in the **bottom-right corner** (tap "Hide Skeleton" to remove it)
+- The detected gesture emoji appears on the **right side**
+- The fired action label (`✌️ Peace Sign → Previous Item`) appears **bottom-left**
+- Navigate to **Menu** or **Settings** tabs to configure
 
 ---
 
 ## How the Classifier Works
 
-MediaPipe's `HandLandmarker` returns 21 normalized landmarks per hand (x, y in [0, 1], origin top-left).
+MediaPipe `HandLandmarker` returns 21 normalized landmarks (x, y ∈ [0, 1], origin top-left).
 
 **Static gestures** (single frame):
 - **Finger extended** = `dist(tip, wrist) / dist(MCP, wrist) > 1.35`
 - **Thumb extended** = `dist(thumbTip, wrist) / dist(thumbCMC, wrist) > 1.15`
-- **Thumbs up/down** direction = `thumbTip.y < thumbMCP.y` (MediaPipe y increases downward)
+- **Thumbs up/down** = `thumbTip.y < thumbMCP.y` (MediaPipe y increases downward)
 
 **Dynamic gestures** (wrist movement over 0.5 s):
-- Last 500 ms of wrist positions tracked
-- If `max(|Δx|, |Δy|) > swipeThreshold` (default 0.18), fire swipe on dominant axis
-- History cleared after swipe fires to prevent repeat triggers
+- Track last 500 ms of wrist positions
+- If `max(|Δx|, |Δy|) > swipeThreshold` (default 0.18), fire on dominant axis
+- History cleared after swipe to prevent repeats
 
-**Cooldown** (default 1.0 s): prevents a held gesture from firing repeatedly.
-
----
-
-## Differences from the iOS Version
-
-| Feature | iOS (`rokid-gesture-ios`) | Android (this app) |
-|---------|--------------------------|-------------------|
-| Camera | iPhone front/back camera | Glasses world/front camera |
-| Detection | Apple Vision `VNDetectHumanHandPoseRequest` | MediaPipe `HandLandmarker` |
-| Transport | TCP :8104 → glasses | Direct on-device overlay |
-| Platform | SwiftUI + iOS 17 | Jetpack Compose + Android API 26 |
-| Coordinate origin | Bottom-left (y-up) | Top-left (y-down) |
-| iPhone required | Yes | No |
-
-Both use identical geometry-based classification and the same 6 gesture + 4 swipe model.
-
----
-
-## Tips for Best Results
-
-- **Camera** — use the world-facing (back) camera; it points where you look
-- **Distance** — 30–60 cm from the glasses
-- **Lighting** — well-lit environment improves landmark confidence
-- **Steady wrist** — hold still between gestures; swipe is a quick wrist flick
-- **Confidence** — landmarks below 0.5 are ignored automatically
-- **Cooldown** — adjust in Settings if gestures fire too fast or too slow
+**Cooldown** (default 1.0 s): prevents a held gesture from firing repeatedly. Adjustable 0.3 – 3.0 s in Settings.
 
 ---
 
@@ -124,10 +118,10 @@ Both use identical geometry-based classification and the same 6 gesture + 4 swip
 
 | Component | Requirement |
 |-----------|-------------|
-| Device | Rokid Station or any Android device running API 26+ (Android 8.0+) |
-| Android Studio | Hedgehog (2023.1.1)+ / Gradle 8.9+ |
+| Device | Rokid AI glasses (Android-based, API 26+) |
+| Android Studio | Hedgehog 2023.1.1+ / Gradle 8.9 |
 | Camera permission | Required |
-| MediaPipe model | `hand_landmarker.task` in `app/src/main/assets/` (not included — see Quick Start) |
+| MediaPipe model | `hand_landmarker.task` in `app/src/main/assets/` — see Quick Start |
 
 ---
 
@@ -136,28 +130,42 @@ Both use identical geometry-based classification and the same 6 gesture + 4 swip
 ```
 rokid-gesture-android/
 └── app/src/main/
-    ├── AndroidManifest.xml
+    ├── AndroidManifest.xml              ← landscape, fullscreen, camera permission
     ├── assets/
-    │   └── hand_landmarker.task          ← download separately (see Quick Start)
+    │   └── hand_landmarker.task         ← download separately (see Quick Start)
+    ├── res/values/themes.xml            ← windowIsTranslucent + black bg for HUD
     └── java/com/rokid/gesture/
-        ├── GestureApp.kt                 ← Application subclass
-        ├── MainActivity.kt               ← entry point + bottom-nav scaffold
+        ├── GestureApp.kt
+        ├── MainActivity.kt              ← immersive mode, landscape, screen-on
         ├── data/
-        │   └── GestureModels.kt          ← LM indices, GestureType, NavAction, AppMenu
+        │   └── GestureModels.kt         ← LM indices, GestureType, NavAction, AppMenu
         ├── vision/
-        │   ├── GestureClassifier.kt      ← 21-joint geometry → GestureType
-        │   └── HandLandmarkHelper.kt     ← CameraX + MediaPipe HandLandmarker
+        │   ├── GestureClassifier.kt     ← 21-joint geometry → GestureType
+        │   └── HandLandmarkHelper.kt    ← CameraX analysis-only (no preview on HUD)
         ├── viewmodel/
-        │   └── GestureViewModel.kt       ← wrist history, cooldown, menu navigation
+        │   └── GestureViewModel.kt      ← wrist history, cooldown, menu navigation
         └── ui/
-            ├── CameraScreen.kt           ← live preview + skeleton overlay + gesture badge
-            ├── MenuScreen.kt             ← add/edit/reorder menu items
-            └── SettingsScreen.kt         ← gesture→action mapping, cooldown, swipe sensitivity
+            ├── HudScreen.kt             ← transparent AR overlay: menu + gesture + skeleton
+            ├── MenuScreen.kt            ← add/edit/reorder menu items
+            └── SettingsScreen.kt        ← gesture→action mapping, cooldown, swipe sensitivity
 ```
 
 ---
 
-## Part of the Rokid iOS/Android Bridge Suite
+## Key Difference from `rokid-gesture-ios`
+
+| | [rokid-gesture-ios](https://github.com/kbaker827/rokid-gesture-ios) | rokid-gesture-android (this) |
+|---|---|---|
+| Platform | iPhone (iOS 17) | Rokid AI glasses (Android) |
+| Camera | iPhone camera | **Glasses' own camera** |
+| Detection | Apple Vision framework | MediaPipe HandLandmarker |
+| Display | Menu sent over TCP :8104 | **Direct AR overlay on HUD** |
+| iPhone required | Yes | **No — fully standalone** |
+| Camera preview | Shown on iPhone screen | **Never shown — real world visible** |
+
+---
+
+## Part of the Rokid Suite
 
 | App | Platform | Source | Port |
 |-----|----------|--------|------|
@@ -167,7 +175,7 @@ rokid-gesture-android/
 | [rokid-teams-ios](https://github.com/kbaker827/rokid-teams-ios) | iOS | MS Teams | :8098 |
 | [rokid-outlook-ios](https://github.com/kbaker827/rokid-outlook-ios) | iOS | Outlook | :8099 |
 | [rokid-compass-ios](https://github.com/kbaker827/rokid-compass-ios) | iOS | Compass | :8100 |
-| [rokid-powershell-ios](https://github.com/kbaker827/rokid-powershell-ios) | iOS | PowerShell + AI | :8101/:8102 |
+| [rokid-powershell-ios](https://github.com/kbaker827/rokid-powershell-ios) | iOS | PowerShell + AI Voice | :8101/:8102 |
 | [rokid-govee-ios](https://github.com/kbaker827/rokid-govee-ios) | iOS | Govee Lights | :8103 |
-| [rokid-gesture-ios](https://github.com/kbaker827/rokid-gesture-ios) | iOS | Hand Gestures (iPhone camera) | :8104 |
-| **rokid-gesture-android** | **Android** | **Hand Gestures (glasses camera)** | **on-device** |
+| [rokid-gesture-ios](https://github.com/kbaker827/rokid-gesture-ios) | iOS | Gestures (iPhone camera) | :8104 |
+| **rokid-gesture-android** | **Android / Rokid AI glasses** | **Gestures (glasses camera + HUD)** | **on-device** |
